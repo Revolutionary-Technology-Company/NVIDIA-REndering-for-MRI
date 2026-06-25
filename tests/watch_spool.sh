@@ -38,19 +38,25 @@ while true; do
             END_TIME=$(date +%s.%N)
             RUN_DURATION=$(echo "$END_TIME - $START_TIME" | bc 2>/dev/null || awk "BEGIN {print $END_TIME - $START_TIME}")
 
+            # Update your watch_spool.sh script failure block to resemble this execution step:
             if [ $EXIT_CODE -eq 0 ]; then
                 rm -rf "$WATCH_DIR"/*
-                # Log success matrix metrics
                 python3 "$METRICS_SCRIPT" "SUCCESS" "$TOTAL_FILES" "$RUN_DURATION"
-                echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🎉 Pipeline processing logged into metrics.json" >> "$LOG_FILE"
+                python3 /workspace/pipeline/pipelines/generate_dashboard.py
             else
                 echo "[$(date '+%Y-%m-%d %H:%M:%S')] ❌ Pipeline failed. Redirecting to error array." >> "$LOG_FILE"
                 mkdir -p "/workspace/error_spool"
                 mv "$WATCH_DIR"/* "/workspace/error_spool/"
                 
-                # Log failure metrics matrix
                 python3 "$METRICS_SCRIPT" "FAILURE" "$TOTAL_FILES" "$RUN_DURATION" "Pipeline processing error: Exit code $EXIT_CODE"
+                python3 /workspace/pipeline/pipelines/generate_dashboard.py
+                
+                # ==================================================================
+                # NEW INCIDENT CALL INTEGRATION HOOK
+                # ==================================================================
+                python3 /workspace/pipeline/pipelines/send_alert.py "MRI Pipeline failure logged on Node 01 during processing phase execution. Exit Code: $EXIT_CODE. Raw DICOM batch relocated safely to error_spool workspace."
             fi
+
         fi
     fi
     sleep 3
