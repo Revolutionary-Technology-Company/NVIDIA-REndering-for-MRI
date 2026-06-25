@@ -1,0 +1,72 @@
+name: MRI NVIDIA Pipeline CI
+
+on:
+  push:
+    branches: [ "main" ]
+  pull_request:
+    branches: [ "main" ]
+
+jobs:
+  validate-repository:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout Code
+      uses: actions/checkout@v4
+
+    # 1. Ensure developers haven't broken the required folder layout
+    - name: Verify Repository Structure
+      run: |
+        echo "Validating repository layout..."
+        MISSING_DIRS=0
+        
+        for dir in config pipelines tests models tutorials; do
+          if [ ! -d "$dir" ]; then
+            echo "❌ Error: Required directory '$dir' is missing!"
+            MISSING_DIRS=$((MISSING_DIRS + 1))
+          else
+            echo "✅ Found directory: $dir"
+          fi
+        done
+        
+        if [ $MISSING_DIRS -gt 0 ]; then
+          exit 1
+        fi
+
+    # 2. Prevent syntax regressions inside critical JSON config frameworks
+    - name: Validate Router JSON Config
+      run: |
+        if [ -f "config/router.json" ]; then
+          echo "Validating config/router.json configuration formatting..."
+          jq . config/router.json > /dev/null || (echo "❌ Error: config/router.json contains invalid JSON syntax!" && exit 1)
+          echo "✅ JSON validation passed."
+        else
+          echo "⚠️ Warning: config/router.json not found yet, skipping check."
+        fi
+
+    # 3. Check for execution permissions on pipeline and automation scripts
+    - name: Check Script Executability
+      run: |
+        if [ -f "pipelines/anonymize.py" ]; then
+          if [ ! -x "pipelines/anonymize.py" ]; then
+            echo "❌ Error: pipelines/anonymize.py must be executable! (Run: chmod +x pipelines/anonymize.py)"
+            exit 1
+          fi
+          echo "✅ pipelines/anonymize.py execution permissions verified."
+        fi
+
+    # 4. Make sure the orchestration container layers compile smoothly
+    - name: Test Docker Compose Orchestration Setup
+      run: |
+        if [ -f "docker-compose.yml" ]; then
+          echo "Testing Docker Compose file construction syntax..."
+          # Create placeholder files if missing so Docker config validation passes
+          mkdir -p config
+          touch config/router.json config/mri_route_trigger.lua
+          
+          docker compose config > /dev/null || (echo "❌ Error: docker-compose.yml has layout or syntax issues!" && exit 1)
+          echo "✅ Docker Compose config formatting verified."
+        else
+          echo "❌ Error: Core docker-compose.yml configuration file is missing from root!"
+          exit 1
+        fi
