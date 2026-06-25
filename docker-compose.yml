@@ -41,5 +41,18 @@ volumes:
   mri_spool_volume:
     driver: local
 
+  # Secure Hospital Intranet Dashboard Web Server Gateway
+  mri-dashboard-web:
+    image: nginx:alpine
+    container_name: mri_dashboard_server
+    restart: unless-stopped
+    ports:
+      - "9920:9920"  # Exposes secure metrics pipeline dashboard over port 9920
+    volumes:
+      - .:/workspace/pipeline:ro  # Read-only mount of repository contents
+      - ./config/nginx-dashboard.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - nvidia-mri-compute
+
     working_dir: /workspace/pipeline
     command: /bin/bash -c "pip install pydicom && chmod +x ./tests/watch_spool.sh && ./tests/watch_spool.sh"
