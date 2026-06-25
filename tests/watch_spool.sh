@@ -1,4 +1,6 @@
 #!/bin/bash
+# Append this line inside the 'if' and 'else' condition blocks right below the track_metrics.py calls:
+python3 /workspace/pipeline/pipelines/generate_dashboard.py
 # ==============================================================================
 # Revolutionary Technology Company - MRI Pipeline Automation Daemon with Metrics Hooks
 # Monitors incoming spool volumes, runs processing pipelines, and writes metrics.json.
