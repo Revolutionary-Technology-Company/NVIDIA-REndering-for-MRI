@@ -1,0 +1,30 @@
+{
+  "Name" : "NVIDIA_RTX6000_MRI_Router_Node",
+  "StorageDirectory" : "/var/lib/orthanc/db",
+  "IndexDirectory" : "/var/lib/orthanc/db",
+  "DicomPort" : 104,
+  "HttpPort" : 8042,
+  "AuthenticationEnabled" : false,
+
+  "DicomModalities" : {
+    "GE_15T" : [ "GE_MR_SCANNER", "10.0.1.50", 104 ],
+    "SIEMENS_3T" : [ "SIEMENS_3T_MR", "10.0.1.51", 104 ],
+    "SIEMENS_AVANTO" : [ "AVANTO_OUTPATIENT", "10.0.1.52", 104 ],
+    "CLOUD_PACS" : [ "SECURE_CLOUD_PACS", "pacs.revolutionarytech.cloud", 443 ]
+  },
+
+  "AcceptedTransferSyntaxes" : [
+    "1.2.840.10008.1.2.1",
+    "1.2.840.10008.1.2",
+    "1.2.840.10008.1.2.4.70",
+    "1.2.840.10008.1.2.4.90"
+  ],
+
+  "ConcurrentJobs" : 4,
+  "HttpDescribeErrors" : true,
+  "DicomAlwaysAllowStore" : true,
+
+  "RegisteredScripts" : [
+    "/etc/orthanc/mri_route_trigger.lua"
+  ]
+}
