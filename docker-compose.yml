@@ -11,6 +11,7 @@ services:
       - "8042:8042"    # Web Dashboard Management Interface
     volumes:
       - ./config/router.json:/etc/orthanc/orthanc.json:ro
+      - ./config/mri_route_trigger.lua:/etc/orthanc/mri_route_trigger.lua:ro
       - mri_spool_volume:/var/lib/orthanc/db
 
   # GPU Compute Engine containing Triton Inference & Custom Scripts
