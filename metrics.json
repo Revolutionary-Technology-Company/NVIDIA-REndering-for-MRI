@@ -1,0 +1,18 @@
+[
+  {
+    "timestamp": "2026-06-24T06:12:45Z",
+    "execution_status": "SUCCESS",
+    "processed_slices_count": 160,
+    "total_runtime_seconds": 2.451,
+    "throughput_slices_per_sec": 65.28,
+    "system_errors": "None"
+  },
+  {
+    "timestamp": "2026-06-24T06:15:20Z",
+    "execution_status": "FAILURE",
+    "processed_slices_count": 48,
+    "total_runtime_seconds": 0.312,
+    "throughput_slices_per_sec": 153.85,
+    "system_errors": "Pipeline processing error: Exit code 1"
+  }
+]
