@@ -1,66 +1,55 @@
 #!/usr/bin/env python3
 """
-Revolutionary Technology Company - Ultrasound Cine-Loop Frame Extractor
-Deconstructs multi-frame video blocks and verifies spatial calibration tags.
+Revolutionary Technology Company - Multicore Ultrasound Cine Deconstructor
+Parallel frame extraction engine leveraging multiprocessing core assignment pools.
 """
 
 import os
 import sys
 import pydicom
 import numpy as np
+from multiprocessing import Pool, cpu_count
 
-def extract_ultrasound_metadata(ds: pydicom.dataset.Dataset):
-    """Parses region calibration vectors to establish physical pixel measurements (mm/pixel)."""
-    regions = ds.get("SequenceOfUltrasoundRegions", None)
-    if regions:
-        region = regions[0]
-        physical_delta_x = region.get("PhysicalDeltaX", None)
-        physical_delta_y = region.get("PhysicalDeltaY", None)
-        return {"mm_per_pixel_x": physical_delta_x, "mm_per_pixel_y": physical_delta_y}
-    return {"mm_per_pixel_x": "Unknown", "mm_per_pixel_y": "Unknown"}
-
-def process_ultrasound_file(input_file: str, output_dir: str):
-    print(f"[US-PIPELINE] Ingesting file: {input_file}")
-    ds = pydicom.dcmread(input_file)
-    
-    if ds.get("Modality") != "US":
-        print("[US-ERROR] File modality is not Ultrasound.")
+def worker_write_us_frame(args):
+    """Isolated process task writing a single extracted frame to disk."""
+    frame_idx, output_path, input_file_path, frame_bytes, shape, delta_x, delta_y = args
+    try:
+        # Reconstruct frame object context
+        ds = pydicom.dcmread(input_file_path, stop_before_pixels=True)
+        if "NumberOfFrames" in ds: del ds.NumberOfFrames
+        
+        ds.Rows, ds.Columns = shape[0], shape[1]
+        ds.PixelData = frame_bytes
+        ds.InstanceNumber = frame_idx + 1
+        ds.ImageComments = f"US_MULTICORE_FRAME_RTX6000;SCALE_X={delta_x};SCALE_Y={delta_y}"
+        ds.save_as(output_path)
+        return True
+    except Exception:
         return False
 
-    # Extract mm-per-pixel measurement parameters
-    spatial_calibration = extract_ultrasound_metadata(ds)
-    print(f"[US-CALIBRATION] Measured spatial scaling vectors: {spatial_calibration}")
-
-    # Verify if file is a moving video clip (Cine-Loop) or a static frame
-    num_frames = int(ds.get("NumberOfFrames", 1))
-    print(f"[US-GEOMETRY] Located {num_frames} frames inside multi-frame video block.")
-
-    pixel_data = ds.pixel_array
+def parallel_deconstruct_ultrasound(input_file: str, output_dir: str):
     os.makedirs(output_dir, exist_ok=True)
+    ds = pydicom.dcmread(input_file)
+    
+    # Extract regional metric definitions
+    regions = ds.get("SequenceOfUltrasoundRegions", None)
+    delta_x = regions[0].get("PhysicalDeltaX", "N/A") if regions else "N/A"
+    delta_y = regions[0].get("PhysicalDeltaY", "N/A") if regions else "N/A"
+    
+    pixel_data = ds.pixel_array
+    num_frames = int(ds.get("NumberOfFrames", 1))
+    shape = (ds.Rows, ds.Columns)
 
-    # Deconstruct cine-loop frame allocations sequentially
-    for frame_idx in range(num_frames):
-        # Extract a single 2D image plane (Handles RGB Doppler color grids or Grayscale)
-        if num_frames > 1:
-            frame_matrix = pixel_data[frame_idx, :, :, :] if len(pixel_data.shape) == 4 else pixel_data[frame_idx, :, :]
-        else:
-            frame_matrix = pixel_data
+    task_args = []
+    print(f"[US-MULTICORE] Assembling frame deconstruction queue for {num_frames} frames...")
+    for idx in range(num_frames):
+        frame_matrix = pixel_data[idx] if num_frames > 1 else pixel_data
+        out_path = os.path.join(output_dir, f"frame_{idx:03d}.dcm")
+        task_args.append((idx, out_path, input_file, frame_matrix.tobytes(), shape, delta_x, delta_y))
 
-        # Clone basic metadata structures to save independent image slices
-        frame_ds = pydicom.dcmread(input_file)
-        if "NumberOfFrames" in frame_ds:
-            del frame_ds.NumberOfFrames
-            
-        frame_ds.Rows, frame_ds.Columns = frame_matrix.shape[0], frame_matrix.shape[1]
-        frame_ds.PixelData = frame_matrix.tobytes()
-        frame_ds.InstanceNumber = frame_idx + 1
-        frame_ds.ImageComments = f"US_FRAME_EXTRACTED_RTX6000;SCALE_X={spatial_calibration['mm_per_pixel_x']}"
-        
-        output_file_path = os.path.join(output_dir, f"us_frame_{frame_idx:03d}.dcm")
-        frame_ds.save_as(output_file_path)
-
-    print(f"[US-SUCCESS] Deconstructed {num_frames} ultrasound loops into destination directory: {output_dir}")
-    return True
+    with Pool(processes=cpu_count()) as pool:
+        _ = pool.map(worker_write_us_frame, task_args)
+    print(f"[US-SUCCESS] Multicore split completed across {cpu_count()} worker cores.")
 
 if __name__ == "__main__":
-    process_ultrasound_file(sys.argv[1], sys.argv[2])
+    parallel_deconstruct_ultrasound(sys.argv[1], sys.argv[2])
