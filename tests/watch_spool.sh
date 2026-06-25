@@ -94,6 +94,25 @@ while true; do
                 continue
             fi
 
+            # Add this code block inside your master watch loop to support multi-modality parsing:
+                FIRST_FILE=$(ls -1 "$WATCH_DIR" | head -n 1)
+                MODALITY=$(docker exec rtx6000_mri_worker python3 -c "import pydicom; print(pydicom.dcmread('$WATCH_DIR/$FIRST_FILE', stop_before_pixels=True).get('Modality','UNKNOWN'))")
+
+                case "$MODALITY" in
+                    "MR")
+                        # Run your existing 5-stage MRI loop
+                        ;;
+                    "CT")
+                        python3 /workspace/pipeline/pipelines/process_ct_volume.py "$WATCH_DIR" "$STAGE_FINAL"
+                        ;;
+                    "US")
+                        python3 /workspace/pipeline/pipelines/process_ultrasound_cine.py "$WATCH_DIR/$FIRST_FILE" "$STAGE_FINAL"
+                        ;;
+                    *)
+                        echo "Modality $MODALITY not supported yet. Routing directly to Cloud PACS..."
+                        ;;
+                esac
+
             # ------------------------------------------------------------------
             # STAGE 4: Volumetric Spatial Anonymization (Defacing Privacy Guard)
             # ------------------------------------------------------------------
