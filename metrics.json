@@ -1,18 +1,47 @@
 [
   {
-    "timestamp": "2026-06-24T06:12:45Z",
+    "timestamp": "2026-06-25T02:14:10Z",
+    "modality": "MR",
     "execution_status": "SUCCESS",
-    "processed_slices_count": 160,
-    "total_runtime_seconds": 2.451,
-    "throughput_slices_per_sec": 65.28,
+    "processed_slices_count": 192,
+    "total_runtime_seconds": 2.104,
+    "throughput_slices_per_sec": 91.25,
     "system_errors": "None"
   },
   {
-    "timestamp": "2026-06-24T06:15:20Z",
+    "timestamp": "2026-06-25T03:05:22Z",
+    "modality": "CT",
+    "execution_status": "SUCCESS",
+    "processed_slices_count": 512,
+    "total_runtime_seconds": 1.496,
+    "throughput_slices_per_sec": 342.25,
+    "system_errors": "Hardware Max Performance Profile: CTDI=15.4mGy; DLP=450.2mGycm"
+  },
+  {
+    "timestamp": "2026-06-25T04:12:45Z",
+    "modality": "US",
+    "execution_status": "SUCCESS",
+    "processed_slices_count": 300,
+    "total_runtime_seconds": 1.583,
+    "throughput_slices_per_sec": 189.51,
+    "system_errors": "None"
+  },
+  {
+    "timestamp": "2026-06-25T05:30:12Z",
+    "modality": "MR",
     "execution_status": "FAILURE",
-    "processed_slices_count": 48,
-    "total_runtime_seconds": 0.312,
-    "throughput_slices_per_sec": 153.85,
-    "system_errors": "Pipeline processing error: Exit code 1"
+    "processed_slices_count": 64,
+    "total_runtime_seconds": 0.412,
+    "throughput_slices_per_sec": 155.34,
+    "system_errors": "QA Failure: Image matrix motion limits breached on Siemens 3T Node."
+  },
+  {
+    "timestamp": "2026-06-25T06:00:00Z",
+    "modality": "SYSTEM_BENCHMARK",
+    "execution_status": "SUCCESS",
+    "processed_slices_count": 800,
+    "total_runtime_seconds": 3.558,
+    "throughput_slices_per_sec": 224.84,
+    "system_errors": "Hardware Max Performance Profile: CT=342FPS, US=189FPS"
   }
 ]
