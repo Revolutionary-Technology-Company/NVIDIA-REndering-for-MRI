@@ -1,3 +1,5 @@
+local cmd = 'python3 /workspace/pipeline/pipelines/reconstruct_mri.py ' .. dicomPath .. ' ' .. outputPath
+
 -- Execute every time a scanner pushes a new file instance to the RTX 6000 Node
 function OnStoredInstance(instanceId, tags, metadata)
    
