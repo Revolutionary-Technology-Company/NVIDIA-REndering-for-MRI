@@ -1,5 +1,5 @@
 {
-  "Name" : "NVIDIA_RTX6000_MRI_Router_Node",
+  "Name" : "NVIDIA_RTX6000_MULTI_MODALITY_EDGE_ROUTER",
   "StorageDirectory" : "/var/lib/orthanc/db",
   "IndexDirectory" : "/var/lib/orthanc/db",
   "DicomPort" : 104,
@@ -7,10 +7,28 @@
   "AuthenticationEnabled" : false,
 
   "DicomModalities" : {
-    "GE_15T" : [ "GE_MR_SCANNER", "10.0.1.50", 104 ],
-    "SIEMENS_3T" : [ "SIEMENS_3T_MR", "10.0.1.51", 104 ],
-    "SIEMENS_AVANTO" : [ "AVANTO_OUTPATIENT", "10.0.1.52", 104 ],
-    "CLOUD_PACS" : [ "SECURE_CLOUD_PACS", "pacs.revolutionarytech.cloud", 443 ]
+    "// === MRI SCANNER NETWORK NODES ===" : "",
+    "GE_15T"           : [ "GE_MR_SCANNER", "10.0.1.50", 104 ],
+    "SIEMENS_3T"       : [ "SIEMENS_3T_MR", "10.0.1.51", 104 ],
+    "SIEMENS_AVANTO"   : [ "AVANTO_OUTPATIENT", "10.0.1.52", 104 ],
+
+    "// === COMPUTED TOMOGRAPHY (CT) SCANNER NETWORK NODES ===" : "",
+    "CT_ED_SIEMENS_FORCE" : [ "SIEMENS_FORCE_ED", "10.0.2.10", 104 ],
+    "CT_ED_SIEMENS_AS_PLUS": [ "SIEMENS_AS_PLUS_ED", "10.0.2.11", 104 ],
+    "CT_ANGIO_FLUORO_3D"  : [ "CT_FLUORO_INTEGRATED", "10.0.2.12", 104 ],
+    "CT_ACUTE_GE_ROW16_01": [ "GE_CT_ROW16_A", "10.0.2.20", 104 ],
+    "CT_ACUTE_GE_ROW16_02": [ "GE_CT_ROW16_B", "10.0.2.21", 104 ],
+
+    "// === ULTRASOUND (US) SCANNER NETWORK NODES ===" : "",
+    "US_PHILIPS_IU22_01"  : [ "PHILIPS_IU22_A", "10.0.3.30", 104 ],
+    "US_PHILIPS_IU22_02"  : [ "PHILIPS_IU22_B", "10.0.3.31", 104 ],
+    "US_PHILIPS_IU22_03"  : [ "PHILIPS_IU22_C", "10.0.3.32", 104 ],
+    "US_PHILIPS_IU22_04"  : [ "PHILIPS_IU22_D", "10.0.3.33", 104 ],
+    "US_TRAUMA_SONOSITE_01": [ "SONOSITE_PORTABLE_A", "10.0.3.40", 104 ],
+    "US_TRAUMA_SONOSITE_02": [ "SONOSITE_PORTABLE_B", "10.0.3.41", 104 ],
+
+    "// === UPSTREAM STORAGE ENDPOINTS ===" : "",
+    "CLOUD_PACS"       : [ "SECURE_CLOUD_PACS", "pacs.revolutionarytech.cloud", 443 ]
   },
 
   "AcceptedTransferSyntaxes" : [
@@ -20,7 +38,7 @@
     "1.2.840.10008.1.2.4.90"
   ],
 
-  "ConcurrentJobs" : 4,
+  "ConcurrentJobs" : 8,
   "HttpDescribeErrors" : true,
   "DicomAlwaysAllowStore" : true,
 
