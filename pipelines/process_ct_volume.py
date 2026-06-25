@@ -1,13 +1,15 @@
 #!/usr/bin/env python3
 """
-Revolutionary Technology Company - CT Dose Audit & Lung Segmenter
-Extracts radiation metrics and applies CUDA-accelerated volume thresholding.
+Revolutionary Technology Company - Multicore CT Dose Audit & Lung Segmenter
+Asynchronous multiprocess I/O pipeline with parallel CUDA stream thresholding.
 """
 
 import os
 import sys
+import time
 import pydicom
 import numpy as np
+from multiprocessing import Pool, cpu_count
 
 try:
     import torch
@@ -16,64 +18,66 @@ except ImportError:
     torch = None
     CUDA_AVAILABLE = False
 
-def extract_ct_dose_metrics(ds: pydicom.dataset.Dataset) -> dict:
-    """Extracts CT Dose Index (CTDIvol) and Dose Length Product (DLP) from metadata."""
-    # CTDIvol is typically stored in Hounsfield/Exposure elements or vendor tags
-    ctdi = ds.get((0x0018, 0x9345), "N/A") # CTDIvol tag
-    dlp = ds.get((0x0018, 0x9346), "N/A")  # Total DLP tag
-    return {"CTDIvol_mGy": str(ctdi), "DLP_mGy_cm": str(dlp)}
+def worker_process_ct_slice(args):
+    """Isolated worker process to scale, threshold, and save a single CT slice."""
+    input_path, output_path, slope, intercept, ctdi, dlp = args
+    try:
+        start_time = time.time()
+        ds = pydicom.dcmread(input_path)
+        if ds.get("Modality") != "CT":
+            return False, "Skipped non-CT file"
 
-def segment_lungs_cuda(volume: np.ndarray, lower_hu: int = -900, upper_hu: int = -400) -> np.ndarray:
-    """Uses GPU arrays to mask Hounsfield Unit (HU) ranges corresponding to lung air spaces."""
-    device = torch.device("cuda:0")
-    tensor_vol = torch.from_numpy(volume.astype(np.float32)).to(device)
-    
-    # Create binary mask for air tissue density (-900 to -400 HU)
-    mask = (tensor_vol >= lower_hu) & (tensor_vol <= upper_hu)
-    
-    # Apply mask: keep lung tissue structures, zero out everything else
-    segmented_tensor = torch.where(mask, tensor_vol, torch.tensor(0.0, device=device))
-    
-    segmented_vol = segmented_tensor.cpu().numpy().astype(np.int16)
-    torch.cuda.synchronize()
-    return segmented_vol
+        # Extract raw voxel matrix and scale to Hounsfield Units (HU)
+        pixel_array = ds.pixel_array.astype(np.float32)
+        hu_array = (pixel_array * slope) + intercept
 
-def run_ct_pipeline(input_dir: str, output_dir: str):
-    print(f"[CT-PIPELINE] Processing CT slices inside: {input_dir}")
-    slices = [pydicom.dcmread(os.path.join(input_dir, f)) for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
-    slices.sort(key=lambda x: float(x.SliceLocation) if "SliceLocation" in x else 0)
-    
-    # Audit radiation dose profiles from the primary slice
-    dose_info = extract_ct_dose_metrics(slices[0])
-    print(f"[CT-DOSE-AUDIT] Extracted metrics: {dose_info}")
+        if CUDA_AVAILABLE:
+            device = torch.device("cuda:0")
+            stream = torch.cuda.Stream(device=device)
+            with torch.cuda.stream(stream):
+                tensor_slice = torch.from_numpy(hu_array).to(device, non_blocking=True)
+                # Create lung mask threshold loop (-900 HU to -400 HU)
+                mask = (tensor_slice >= -900) & (tensor_slice <= -400)
+                segmented_tensor = torch.where(mask, tensor_slice, torch.tensor(0.0, device=device))
+                
+                # Convert back to raw scanner integer space
+                final_tensor = (segmented_tensor - intercept) / slope
+                processed_pixels = final_tensor.cpu().numpy()
+            stream.synchronize()
+        else:
+            segmented_hu = np.where((hu_array >= -900) & (hu_array <= -400), hu_array, 0)
+            processed_pixels = (segmented_hu - intercept) / slope
 
-    # Reconstruct 3D matrix block
-    rows, cols = int(slices[0].Rows), int(slices[0].Columns)
-    volume_matrix = np.zeros((len(slices), rows, cols), dtype=np.int16)
-    for i, s in enumerate(slices):
-        volume_matrix[i, :, :] = s.pixel_array
-
-    # Rescale pixel values to true Hounsfield Units (HU) using vendor slope/intercept
-    slope = float(slices[0].get("RescaleSlope", 1))
-    intercept = float(slices[0].get("RescaleIntercept", 0))
-    hu_volume = (volume_matrix * slope) + intercept
-
-    # Segment lung tissue on GPU
-    if CUDA_AVAILABLE:
-        segmented_hu = segment_lungs_cuda(hu_volume)
-    else:
-        segmented_hu = np.where((hu_volume >= -900) & (hu_volume <= -400), hu_volume, 0)
-
-    # Convert back to raw pixel data mapping and save
-    final_volume = ((segmented_hu - intercept) / slope).astype(np.uint16)
-    
-    os.makedirs(output_dir, exist_ok=True)
-    for i, s in enumerate(slices):
-        s.PixelData = final_volume[i, :, :].tobytes()
-        s.ImageComments = f"CT_LUNG_SEGMENTED_RTX6000;DLP={dose_info['DLP_mGy_cm']}"
-        s.save_as(os.path.join(output_dir, f"segmented_ct_{i:04d}.dcm"))
+        # Save slice data back to file disk
+        processed_pixels = np.clip(processed_pixels, 0, 65535).astype(np.uint16)
+        ds.PixelData = processed_pixels.tobytes()
+        ds.ImageComments = f"CT_MULTICORE_SEGMENTED_RTX6000;CTDI={ctdi};DLP={dlp}"
+        ds.save_as(output_path)
         
-    print(f"[CT-SUCCESS] Volume processed and routed to: {output_dir}")
+        return True, f"Processed CT slice in {time.time() - start_time:.4f}s"
+    except Exception as e:
+        return False, str(e)
+
+def parallel_process_ct_volume(input_dir: str, output_dir: str):
+    os.makedirs(output_dir, exist_ok=True)
+    files = [os.path.join(input_dir, f) for f in os.listdir(input_dir) if os.path.isfile(os.path.join(input_dir, f))]
+    if not files: return
+
+    # Extract sample metadata to apply global vendor calibration constants
+    sample = pydicom.dcmread(files[0], stop_before_pixels=True)
+    slope = float(sample.get("RescaleSlope", 1))
+    intercept = float(sample.get("RescaleIntercept", 0))
+    ctdi = str(sample.get((0x0018, 0x9345), "N/A"))
+    dlp = str(sample.get((0x0018, 0x9346), "N/A"))
+
+    task_args = []
+    for f in files:
+        out_f = os.path.join(output_dir, "segmented_" + os.path.basename(f))
+        task_args.append((f, out_f, slope, intercept, ctdi, dlp))
+
+    print(f"[CT-MULTICORE] Distributing {len(files)} slices across {cpu_count()} CPU cores...")
+    with Pool(processes=cpu_count()) as pool:
+        _ = pool.map(worker_process_ct_slice, task_args)
 
 if __name__ == "__main__":
-    run_ct_pipeline(sys.argv[1], sys.argv[2])
+    parallel_process_ct_volume(sys.argv[1], sys.argv[2])
