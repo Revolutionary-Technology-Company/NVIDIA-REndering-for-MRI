@@ -1,62 +1,126 @@
 #!/bin/bash
-# Append this line inside the 'if' and 'else' condition blocks right below the track_metrics.py calls:
-python3 /workspace/pipeline/pipelines/generate_dashboard.py
 # ==============================================================================
-# Revolutionary Technology Company - MRI Pipeline Automation Daemon with Metrics Hooks
-# Monitors incoming spool volumes, runs processing pipelines, and writes metrics.json.
+# Revolutionary Technology Company - Master MRI Pipeline Daemon
+# Sequentially orchestrates Classification, QA, Resampling, Defacing, and Alerts.
 # ==============================================================================
 
+# Core Spool Directory Paths
 WATCH_DIR="/workspace/incoming_dicom"
-PROCESSED_DIR="/workspace/processed_output"
-PIPELINE_SCRIPT="/workspace/pipeline/pipelines/reconstruct_mri_multicore.py"
-METRICS_SCRIPT="/workspace/pipeline/pipelines/track_metrics.py"
+STAGE_CLASSIFY="/workspace/stage_classified"
+STAGE_RESAMPLE="/workspace/stage_resampled"
+STAGE_FINAL="/workspace/processed_output"
+ERROR_SPOOL="/workspace/error_spool"
+
+# Python Executable Pipelines
+SCRIPT_CLASSIFY="/workspace/pipeline/pipelines/classify_series.py"
+SCRIPT_QA="/workspace/pipeline/pipelines/detect_artifacts.py"
+SCRIPT_RESAMPLE="/workspace/pipeline/pipelines/resample_volume.py"
+SCRIPT_DEFACE="/workspace/pipeline/pipelines/deface_volume.py"
+SCRIPT_METRICS="/workspace/pipeline/pipelines/track_metrics.py"
+SCRIPT_DASHBOARD="/workspace/pipeline/pipelines/generate_dashboard.py"
+SCRIPT_ALERT="/workspace/pipeline/pipelines/send_alert.py"
+
+# Runtime Constraints
 SETTLE_TIME_SECONDS=5
 LOG_FILE="/var/log/mri_pipeline_daemon.log"
+QA_JSON_LOG="/tmp/mri_qa_audit.json"
 
-echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🚀 Starting Auditable MRI Pipeline Watch Daemon..." | tee -a "$LOG_FILE"
+echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🚀 Master Pipeline Daemon Initialized..." | tee -a "$LOG_FILE"
 
-mkdir -p "$WATCH_DIR" "$PROCESSED_DIR"
+# Guarantee physical folder arrays exist on disk space
+mkdir -p "$WATCH_DIR" "$STAGE_CLASSIFY" "$STAGE_RESAMPLE" "$STAGE_FINAL" "$ERROR_SPOOL"
 
 while true; do
     if [ "$(ls -A "$WATCH_DIR" 2>/dev/null)" ]; then
+        echo "[$(date '+%Y-%m-%d %H:%M:%S')] 📥 Raw stream detected. Verifying stability..." >> "$LOG_FILE"
+        
         INITIAL_SIZE=$(du -sb "$WATCH_DIR" | awk '{print $1}')
         sleep "$SETTLE_TIME_SECONDS"
         CURRENT_SIZE=$(du -sb "$WATCH_DIR" | awk '{print $1}')
         
         if [ "$INITIAL_SIZE" -eq "$CURRENT_SIZE" ] && [ "$CURRENT_SIZE" -gt 0 ]; then
-            # Count the files precisely before sending to the processing array
             TOTAL_FILES=$(ls -1 "$WATCH_DIR" | wc -l)
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✅ Series transfer complete. Total raw slices: $TOTAL_FILES" | tee -a "$LOG_FILE"
             
-            echo "[$(date '+%Y-%m-%d %H:%M:%S')] ✅ Volume stabilized. Processing $TOTAL_FILES files..." >> "$LOG_FILE"
-            
-            # Start tracking the high-precision processing duration
             START_TIME=$(date +%s.%N)
             
-            python3 "$PIPELINE_SCRIPT" "$WATCH_DIR" "$PROCESSED_DIR" >> "$LOG_FILE" 2>&1
-            EXIT_CODE=$?
-            
-            END_TIME=$(date +%s.%N)
-            RUN_DURATION=$(echo "$END_TIME - $START_TIME" | bc 2>/dev/null || awk "BEGIN {print $END_TIME - $START_TIME}")
-
-            # Update your watch_spool.sh script failure block to resemble this execution step:
-            if [ $EXIT_CODE -eq 0 ]; then
-                rm -rf "$WATCH_DIR"/*
-                python3 "$METRICS_SCRIPT" "SUCCESS" "$TOTAL_FILES" "$RUN_DURATION"
-                python3 /workspace/pipeline/pipelines/generate_dashboard.py
-            else
-                echo "[$(date '+%Y-%m-%d %H:%M:%S')] ❌ Pipeline failed. Redirecting to error array." >> "$LOG_FILE"
-                mkdir -p "/workspace/error_spool"
-                mv "$WATCH_DIR"/* "/workspace/error_spool/"
-                
-                python3 "$METRICS_SCRIPT" "FAILURE" "$TOTAL_FILES" "$RUN_DURATION" "Pipeline processing error: Exit code $EXIT_CODE"
-                python3 /workspace/pipeline/pipelines/generate_dashboard.py
-                
-                # ==================================================================
-                # NEW INCIDENT CALL INTEGRATION HOOK
-                # ==================================================================
-                python3 /workspace/pipeline/pipelines/send_alert.py "MRI Pipeline failure logged on Node 01 during processing phase execution. Exit Code: $EXIT_CODE. Raw DICOM batch relocated safely to error_spool workspace."
+            # ------------------------------------------------------------------
+            # STAGE 1: Standardize Naming Protocols & Spatial Orientation
+            # ------------------------------------------------------------------
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] 📦 Stage 1: Classifying volume protocols..." >> "$LOG_FILE"
+            python3 "$SCRIPT_CLASSIFY" "$WATCH_DIR" "$STAGE_CLASSIFY" >> "$LOG_FILE" 2>&1
+            if [ $? -ne 0 ]; then
+                echo "❌ Classification stage broken." >> "$LOG_FILE"
+                mv "$WATCH_DIR"/* "$ERROR_SPOOL/"
+                continue
             fi
 
+            # ------------------------------------------------------------------
+            # STAGE 2: Accelerated Quality Assurance (FFT Motion/RF Audit)
+            # ------------------------------------------------------------------
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🔍 Stage 2: Auditing K-space metrics via RTX 6000..." >> "$LOG_FILE"
+            python3 "$SCRIPT_QA" "$STAGE_CLASSIFY" "$QA_JSON_LOG" >> "$LOG_FILE" 2>&1
+            QA_EXIT=$?
+            
+            # Read the JSON result flag to determine image stability
+            IS_CORRUPT=$(jq '.series_flagged_for_rescan' "$QA_JSON_LOG" 2>/dev/null)
+
+            if [ "$QA_EXIT" -ne 0 ] || [ "$IS_CORRUPT" = "true" ]; then
+                echo "[$(date '+%Y-%m-%d %H:%M:%S')] ❌ QA FAILED: High noise/motion artifact signatures located." | tee -a "$LOG_FILE"
+                
+                END_TIME=$(date +%s.%N)
+                RUN_DURATION=$(awk "BEGIN {print $END_TIME - $START_TIME}")
+                
+                # Log incident failure indicators
+                python3 "$SCRIPT_METRICS" "FAILURE" "$TOTAL_FILES" "$RUN_DURATION" "QA Failure: Image matrix motion limits breached."
+                python3 "$SCRIPT_DASHBOARD"
+                python3 "$SCRIPT_ALERT" "MRI Processing Outage: A recent volume series from the scanners failed high-frequency FFT QA limits. Image data isolated in error_spool. Request a re-scan sequence for this patient."
+                
+                mv "$STAGE_CLASSIFY"/* "$ERROR_SPOOL/"
+                rm -rf "$WATCH_DIR"/*
+                continue
+            fi
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')]  QA Verification Passed." >> "$LOG_FILE"
+
+            # ------------------------------------------------------------------
+            # STAGE 3: Cross-Vendor Isotropic Resampling (1mm Cubes)
+            # ------------------------------------------------------------------
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] 📐 Stage 3: Resampling spatial grids to 1.0mm isotropic..." >> "$LOG_FILE"
+            python3 "$SCRIPT_RESAMPLE" "$STAGE_CLASSIFY" "$STAGE_RESAMPLE" >> "$LOG_FILE" 2>&1
+            if [ $? -ne 0 ]; then
+                echo "❌ Resampling stage broken." >> "$LOG_FILE"
+                mv "$STAGE_CLASSIFY"/* "$ERROR_SPOOL/"
+                rm -rf "$WATCH_DIR"/*
+                continue
+            fi
+
+            # ------------------------------------------------------------------
+            # STAGE 4: Volumetric Spatial Anonymization (Defacing Privacy Guard)
+            # ------------------------------------------------------------------
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] 👤 Stage 4: Execution of spatial defacing security profiles..." >> "$LOG_FILE"
+            python3 "$SCRIPT_DEFACE" "$STAGE_RESAMPLE" "$STAGE_FINAL" >> "$LOG_FILE" 2>&1
+            if [ $? -ne 0 ]; then
+                echo "❌ Defacing privacy guard broken." >> "$LOG_FILE"
+                mv "$STAGE_RESAMPLE"/* "$ERROR_SPOOL/"
+                rm -rf "$WATCH_DIR"/*
+                continue
+            fi
+
+            # ------------------------------------------------------------------
+            # STAGE 5: Complete Performance Logging & Dashboard Export
+            # ------------------------------------------------------------------
+            END_TIME=$(date +%s.%N)
+            RUN_DURATION=$(awk "BEGIN {print $END_TIME - $START_TIME}")
+            
+            python3 "$SCRIPT_METRICS" "SUCCESS" "$TOTAL_FILES" "$RUN_DURATION"
+            python3 "$SCRIPT_DASHBOARD"
+            
+            echo "[$(date '+%Y-%m-%d %H:%M:%S')] 🎉 Pipeline processing loop finalized successfully. Files ready for Cloud PACS ingestion." | tee -a "$LOG_FILE"
+            
+            # Clear temporary staging folders
+            rm -rf "$WATCH_DIR"/*
+            rm -rf "$STAGE_CLASSIFY"/*
+            rm -rf "$STAGE_RESAMPLE"/*
         fi
     fi
     sleep 3
